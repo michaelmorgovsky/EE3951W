@@ -1,10 +1,3 @@
-/* 
- * File:   morgo002_lab5_LCDLib.c
- * Author: Mike
- *
- * Created on November 10, 2022, 2:20 PM
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <xc.h>
@@ -27,17 +20,15 @@
 // Fail-Safe Clock Monitor is enabled)
 #pragma config FNOSC = FRCPLL      // Oscillator Select (Fast RC Oscillator with PLL module (FRCPLL))
 
+#define BUFSIZE 1024
+#define NUMSAMPLES 16
+
+int adc_buffer[BUFSIZE];
+int buffer_index = 0;
+
 void pic24_init() { // Initializes T2, PINs, and CLK for pic24 operation
     _RCDIV = 0;
     AD1PCFG = 0xFFFF;
-    
-    T2CON = 0;
-    T2CONbits.TCKPS = 0b10;
-    PR2 = 62500; // 1/8th s cycle
-    TMR2 = 0;
-    IEC0bits.T2IE = 1; // Enable T2 Interrupt
-    _T2IF = 0;
-    T2CONbits.TON = 1;
 }
 
 void delay_ms(unsigned int ms) { // Blocking delay for a given amount of miliseconds
@@ -84,7 +75,7 @@ void lcd_init(void) { // Initializes the LCD
     lcd_cmd(0b00111001); // function set, advance instruction mode
     lcd_cmd(0b00010100); // interval osc
     lcd_cmd(0b01110000); // contrast Low
-    lcd_cmd(0b01010110);
+    lcd_cmd(0b01010110); 
     lcd_cmd(0b01101100); // follower control
     
     delay_ms(200);
@@ -99,7 +90,6 @@ void lcd_init(void) { // Initializes the LCD
 void lcd_setCursor(char x, char y) { // Sets the cursor on the LCD
     char Cursor = (64*y) + x + 128; // Creates the command, 0b1y000xxx 
     lcd_cmd(Cursor); // MSB means writing to DRAM and y and xxx are values for the cursor
-    
 }
 
 void lcd_printChar(char Package) { // Prints the character
@@ -115,7 +105,12 @@ void lcd_printChar(char Package) { // Prints the character
     I2C2TRN = 0b01000000; // 8 bit control byte, RS = 1
     blockingWait();
     
-    I2C2TRN = Package; // 8 bit data byte
+    if(Package != '°') {
+        I2C2TRN = Package; // 8 bit data byte
+    }
+    else {
+        I2C2TRN = 0b11011111;
+    }
     blockingWait();
     
     I2C2CONbits.PEN = 1;
@@ -124,24 +119,97 @@ void lcd_printChar(char Package) { // Prints the character
 
 void lcd_printStr(const char s[]) { // Prints a string to the LCD display
     for(int i=0; i < strlen(s); i++) { // Loop over length of the string
-        if(i >= 8) { 
-            lcd_setCursor(i-8,1); // For all positions of the string 8+, print them on the second LCD line
-        }
-        else {
-            lcd_setCursor(i,0); // Otherwise for the first line
-        }
+        lcd_setCursor(i,0); // for the first line
         lcd_printChar(s[i]); // Print the character
     }
+}
+
+void putVal(int ADCvalue) { // Puts a value from the ADCBUF into the circular buffer
+    adc_buffer[buffer_index++] = ADCvalue;
+    if(buffer_index >= BUFSIZE) {
+        buffer_index = 0;
+    }
+}
+
+void initBuffer() { // Initalizes all values in the circular buffer to 0
+    int i;
+    for(i=0; i < BUFSIZE; i++) {
+        adc_buffer[i] = 0;
+    }
+}
+
+void adc_init() { // ADC initialization
+    TRISAbits.TRISA0 = 1; // input
+    AD1PCFGbits.PCFG0 = 0; // analog pin 2
+    
+    AD1CON2bits.VCFG = 0b000; // Voltage reference for the potentiometer
+    AD1CON3bits.ADCS = 1; // TAD = 125ns
+    AD1CON1bits.SSRC = 0b010; // Sample on T3 Events
+    AD1CON3bits.SAMC = 1; // 1 auto sample time bit
+    AD1CON1bits.FORM = 0b00; // unsigned int
+    
+    AD1CON1bits.ASAM = 1; // auto sample
+    AD1CON2bits.SMPI = 0b0000; //interrupt on every conversion of sequence
+    AD1CON1bits.ADON = 1; // enable ADC
+    
+    // Enable ADC interrupts
+    _AD1IF = 0;
+    _AD1IE = 1;
+    
+    // Timer 3 configuration, 
+    TMR3 = 0;
+    T3CON = 0;
+    T3CONbits.TCKPS = 0b10;
+    PR3 = 15624; // 15624 = 16 samples/sec, 7812 = 32 samples/sec... etc (1953 = 128 samples/sec)
+    T3CONbits.TON = 1;
+}
+
+void timer1_init() { // Initalize Timer1 for 100ms period to update LCD
+    TMR1 = 0;
+    T1CON = 0;
+    T1CONbits.TCKPS = 0b10;
+    PR1 = 24999;
+    T1CONbits.TON = 1;
+    _T1IP = 4;
+    _T1IF = 0;
+    _T1IE = 1;
+}
+
+void _ISR _ADC1Interrupt(void) { // On ADC1Interrupt put value into circular buffer
+    _AD1IF = 0;
+    putVal(ADC1BUF0);
+}
+
+double average(void) { // Calculate the average of the last NUMSAMPLES in buffer
+    double temp = 0;
+        for(int i=buffer_index - NUMSAMPLES; i < buffer_index; i++) { // from buffer index to NUMSAMPLES away
+            if(i >= 0) { // If positive just sum voltage
+                temp += adc_buffer[i];
+            }
+            else { // Otherwise "loop underflow" and grab from end of circular buffer, still last NUMSAMPLES samples
+                temp += adc_buffer[BUFSIZE+i];
+            }   
+        }
+    temp /= NUMSAMPLES; // SUM/NUM = average
+    return temp;
+}
+
+void _ISR _T1Interrupt(void){ // 100ms interrupt, display voltage to LCD
+    IFS0bits.T1IF = 0;
+    char avg[8];
+    float num = 126.53;
+    sprintf(avg, "%3.2f°C", num); // Want to replace with average later
+    lcd_printStr(avg);
 }
 
 int main(void) {
     pic24_init();
     lcd_init();
+    adc_init();
+    timer1_init();
+    initBuffer();
     
-    char string[] = "Lab5 LCD    Test";
-    lcd_printStr(string);
-    
-    for(int i=0; i < 7; i++) {
-        lcd_cmd(0b00011000);
-    }
+    while(1);
+
+    return 0;
 }
