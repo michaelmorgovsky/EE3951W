@@ -105,7 +105,7 @@ void lcd_printChar(char Package) { // Prints the character
     I2C2TRN = 0b01000000; // 8 bit control byte, RS = 1
     blockingWait();
     
-    if(Package != '°') {
+    if(Package != '�') {
         I2C2TRN = Package; // 8 bit data byte
     }
     else {
@@ -139,10 +139,10 @@ void initBuffer() { // Initalizes all values in the circular buffer to 0
 }
 
 void adc_init() { // ADC initialization
-    TRISAbits.TRISA0 = 1; // input
-    AD1PCFGbits.PCFG0 = 0; // analog pin 2
+    AD1PCFGbits.PCFG11 = 0; // Pin 22, Analog pin 11
+    AD1CHSbits.CH0SA = 11; // Pin 11
     
-    AD1CON2bits.VCFG = 0b000; // Voltage reference for the potentiometer
+    AD1CON2bits.VCFG = 0b000; // Voltage reference for the potentiometer 0 & 3.3V
     AD1CON3bits.ADCS = 1; // TAD = 125ns
     AD1CON1bits.SSRC = 0b010; // Sample on T3 Events
     AD1CON3bits.SAMC = 1; // 1 auto sample time bit
@@ -160,7 +160,7 @@ void adc_init() { // ADC initialization
     TMR3 = 0;
     T3CON = 0;
     T3CONbits.TCKPS = 0b10;
-    PR3 = 15624; // 15624 = 16 samples/sec, 7812 = 32 samples/sec... etc (1953 = 128 samples/sec)
+    PR3 = 250; // 15624 = 16 samples/sec, 7812 = 32 samples/sec... etc (1953 = 128 samples/sec)
     T3CONbits.TON = 1;
 }
 
@@ -196,9 +196,8 @@ double average(void) { // Calculate the average of the last NUMSAMPLES in buffer
 
 void _ISR _T1Interrupt(void){ // 100ms interrupt, display voltage to LCD
     IFS0bits.T1IF = 0;
-    char avg[8];
-    float num = 126.53;
-    sprintf(avg, "%3.2f°C", num); // Want to replace with average later
+    char avg[20];
+    sprintf(avg, "%3.2f �C", ((3.3/1024)*average()));
     lcd_printStr(avg);
 }
 
