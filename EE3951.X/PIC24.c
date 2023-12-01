@@ -135,10 +135,13 @@ void initBuffer() { // Initalizes all values in the circular buffer to 0
 }
 
 void adc_init() { // ADC initialization
-    AD1PCFGbits.PCFG11 = 0; // Pin 22, Analog pin 11
-    AD1CHSbits.CH0SA = 11; // Pin 11
+    TRISBbits.TRISB13 = 1; // RB13 pin 24
+    AD1PCFGbits.PCFG11 = 0; // analog pin 11
+    AD1PCFGbits.PCFG0 = 0;
+    AD1PCFGbits.PCFG1 = 0;
+    AD1CHSbits.CH0SA = 11;
     
-    AD1CON2bits.VCFG = 0b011; // Voltage reference from external pins 2 & 3 (Vref+ & Vref-)
+    AD1CON2bits.VCFG = 0b011; // Voltage reference for the potentiometer
     AD1CON3bits.ADCS = 1; // TAD = 125ns
     AD1CON1bits.SSRC = 0b010; // Sample on T3 Events
     AD1CON3bits.SAMC = 1; // 1 auto sample time bit
@@ -156,7 +159,7 @@ void adc_init() { // ADC initialization
     TMR3 = 0;
     T3CON = 0;
     T3CONbits.TCKPS = 0b10;
-    PR3 = 3906; // 15624 = 16 samples/sec, 7812 = 32 samples/sec, 3906 = 64 samples/sec... etc (1953 = 128 samples/sec)
+    PR3 = 3906; // 15624 = 16 samples/sec, 7812 = 32 samples/sec... etc (1953 = 128 samples/sec)
     T3CONbits.TON = 1;
 }
 
@@ -169,6 +172,7 @@ void timer1_init() { // Initalize Timer1 for 100ms period to update LCD
     _T1IP = 4;
     _T1IF = 0;
     _T1IE = 1;
+    
 }
 
 void _ISR _ADC1Interrupt(void) { // On ADC1Interrupt put value into circular buffer
@@ -193,7 +197,7 @@ double average(void) { // Calculate the average of the last NUMSAMPLES in buffer
 void _ISR _T1Interrupt(void){ // 100ms interrupt, display voltage to LCD
     IFS0bits.T1IF = 0;
     char avg[20];
-    sprintf(avg, "%3.2f C*", ((100/1024)*average()));
+    sprintf(avg, "%5.1f C", ((100.0/1023)*average()));
     lcd_printStr(avg);
 }
 
